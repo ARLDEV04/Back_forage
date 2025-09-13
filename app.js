@@ -1,7 +1,6 @@
 const express = require('express');
 const dataRoute = require('./routes/dataRoutes');
 const { getIo } = require('./socket');
-
 const app = express();
 
 //Autorisations cors
@@ -22,4 +21,24 @@ app.use((req, res, next) => {
 });
 
 app.use('/api/data', dataRoute);
+
+// setInterval(async () => {
+//     try{
+//         await donneesRegulieres.findOneAndUpdate(
+//             {},
+//             {
+//               volumeHeure,
+//               volumeMensuel,
+//               volumeTotal,
+//               compteurSecondes,
+//               moisActuel
+//             },
+//             { upsert: true }
+//         );
+//         console.log('État sauvegardé dans MongoDB');
+//     }catch (err) {
+//         console.error('Erreur de sauvegarde de l’état :', err.message);
+//     }
+// }, 60_000); 
+
 module.exports = app;

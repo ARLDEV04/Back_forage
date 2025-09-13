@@ -1,97 +1,130 @@
-//Importer le medel 
-const Data = require('../models/dataModels');
+const donneesHeure = require('../models/dataHourModel');
+const donneesMois = require('../models/dataMonthModel');
+const donneesRegulieres = require('../models/dataRegularModel');
 
-function generateSyntheticWind(temp, humidity, isRaining) {
-    let speed = 0;
-    let direction = 0;
-
-    if (isRaining) {
-        speed = getRandomInRange(15, 35);
-    } else if (humidity > 80 && temp < 20) {
-        speed = getRandomInRange(5, 15);
-    } else if (temp > 28) {
-        speed = getRandomInRange(0, 10);
-    } else {
-        speed = getRandomInRange(3, 20);
-    }
-
-    if (isRaining) {
-        direction = getRandomInRange(180, 270);
-    } else if (temp > 28 && humidity < 50) {
-        direction = getRandomInRange(0, 90);
-    } else {
-        direction = getRandomInRange(0, 360);
-    }
-
-    return {
-        vitesseVent: parseFloat(speed.toFixed(1)),
-        directionVent: Math.round(direction)
-    };
+function getMoisActuel() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
-function getRandomInRange(min, max) {
-    return Math.random() * (max - min) + min;
-}
+// Controller de post
+exports.postDebit = async (req, res) => {
+    const { debit } = req.body;
 
-//API pour la reception des données
-let lastTemperature = null;
-let lastHumidite = null;
-let lastPluviometrie = null;
+    if (typeof debit !== 'number' || isNaN(debit)) {
+      return res.status(400).json({ error: 'Le débit doit être un nombre valide' });
+    }
 
-exports.postData = async (req, res) => {
- 
-    try {
-        const { temperature, humidite, pluviometrie } = req.body;
-        if (temperature !== undefined) lastTemperature = temperature;
-        if (humidite !== undefined) lastHumidite = humidite;
-        if (pluviometrie !== undefined) lastPluviometrie = pluviometrie;
+    const now = new Date();
+    const moisCourant = getMoisActuel();
 
-        if (lastTemperature === null || lastHumidite === null || lastPluviometrie === null) {
-            return res.status(200).json({
-                message: "Valeurs reçues mais incomplètes!"
+    // Volume en temps réel
+    const realVolume = debit / 60;
+
+    // Mise à jour des compteurs
+    global.volumeHeure += realVolume;
+    global.volumeMensuel += realVolume;
+    global.volumeTotal += realVolume;
+    global.compteurSecondes++;
+
+    // Emission websocket
+    req.io?.emit('realtime-data', {
+      debit,
+      volume: realVolume,
+      volumeMensuel: global.volumeMensuel.toFixed(2),
+    });
+
+    // Sauvegarde mensuelle
+
+    if (global.moisActuel && global.moisActuel !== moisCourant) {
+        try {
+            // Sauvegarde le volume du mois écoulé
+            await donneesMois.create({
+                mois: global.moisActuel,
+                volumeTotalMois: global.volumeMensuel,
             });
+
+            console.log(`Mois ${global.moisActuel} sauvegardé avec succès.`);
+
+            // Réinitialisation pour le nouveau mois
+            global.volumeMensuel = 0;
+            global.moisActuel = moisCourant;
+        } catch (err) {
+            console.error('Erreur enregistrement mensuel :', err.message);
         }
-
-        // Génération de données de vent synthétiques
-        const { vitesseVent, directionVent } = generateSyntheticWind(lastTemperature, lastHumidite, lastPluviometrie);
-
-        // Sauvegarde en base
-        const data = new Data({
-            temperature: lastTemperature,
-            humidite: lastHumidite,
-            pluviometrie: lastPluviometrie,
-            vitesseVent: vitesseVent,
-            directionVent: directionVent
-        });
-
-        const saved = await data.save();
-
-        lastTemperature = null;
-        lastHumidite = null;
-        lastPluviometrie = null;
-        
-        // Diffusion en temps réel via Socket.io
-        req.io.emit('new-data', saved);
-        return res.status(201).json({ message: 'Données reçues avec succès', saved });
-
-    } catch (error) {
-        console.error("Erreur enregistrement :", error);
-        return res.status(500).json({ message: "Erreur serveur" });
     }
+
+  // Sauvegarde régulière toutes les minutes
+  if (global.compteurSecondes % 60 === 0) {
+    if (global.volumeHeure > 0 || global.volumeMensuel > 0 || global.volumeTotal > 0) {
+      try {
+        await donneesRegulieres.findOneAndUpdate(
+          {}, // toujours un seul document
+          {
+            volumeHeure: global.volumeHeure,
+            volumeMensuel: global.volumeMensuel,
+            volumeTotal: global.volumeTotal,
+            compteurSecondes: global.compteurSecondes,
+            moisActuel: global.moisActuel
+          },
+          { upsert: true, new: true }
+        );
+        console.log('État régulier sauvegardé');
+      } catch (err) {
+        console.error('Erreur sauvegarde régulière :', err.message);
+      }
+    } else {
+      console.log('Débit nul, état régulier non sauvegardé');
+    }
+  }
+
+  // Sauvegarde toutes les heures
+  if (global.compteurSecondes >= 3600) {
+    const debitMoyen = global.volumeHeure / 60;
+
+    try {
+      const heureData = new donneesHeure({
+        date: new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours()),
+        debitMoyen,
+        volumeHeure: global.volumeHeure,
+        volumeCumule: global.volumeTotal,
+      });
+
+      await heureData.save();
+
+      global.volumeHeure = 0;
+      global.compteurSecondes = 0;
+
+      return res.status(200).json({ message: 'Heure complète : données enregistrées.' });
+    } catch (err) {
+      return res
+        .status(500)
+        .json({ error: 'Erreur enregistrement horaire', details: err.message });
+    }
+  }
+
+  return res
+    .status(200)
+    .json({ message: 'Données reçues', debit, volume: realVolume, volumeMensuel: global.volumeMensuel });
 };
 
 
-exports.getAllDatas = async(req, res) => {
-    try{
-        const allData = await Data.find().sort({date: -1});
-        res.status(200).json(allData);
-    }
-    catch(error){
-        console.error('Erreur lors de la récupération :', error);
-        res.status(500).json({ error: 'Erreur serveur' });
-    }
-}
+// Controller de get
+exports.getDatas = async (req, res) => {
+  try {
+    // Récupérer les dernières données par heure (24h)
+    const data = await donneesHeure
+      .find()
+      .sort({ date: -1 })
+      .limit(24);
+
+    res.status(200).json(data);
+  } catch (err) {
+    console.error("Erreur récupération des données par heure :", err.message);
+    res.status(500).json({ error: "Erreur récupération des données", details: err.message });
+  }
+};
 
 exports.pingServer = (req, res) => {
-    res.status(200).send('pong');
-}
+  res.status(200).send('pong');
+};
