@@ -7,4 +7,4 @@ const donneesParHeure = new mongoose.Schema({
   volumeCumule: Number
 });
 
-module.exports = mongoose.model('donneesParHeure', donneesParHeure);
+module.exports = mongoose.model('DonneesParHeure', donneesParHeure);

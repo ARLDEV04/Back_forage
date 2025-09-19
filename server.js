@@ -4,11 +4,11 @@ const app = require('./app');
 const connectDB = require('./config/db');
 const { initSocket } = require('./socket');
 const donneesRegulieres = require('./models/dataRegularModel');
+const callServices = require('./call');
 
 global.volumeHeure = 0;
 global.volumeMensuel = 0;
 global.volumeTotal = 0;
-global.compteurSecondes = 0;
 global.moisActuel = null;
 
 const PORT = process.env.PORT || 5000;
@@ -23,7 +23,6 @@ connectDB()
       global.volumeHeure = lastState.volumeHeure;
       global.volumeMensuel = lastState.volumeMensuel;
       global.volumeTotal = lastState.volumeTotal;
-      global.compteurSecondes = lastState.compteurSecondes;
       global.moisActuel = lastState.moisActuel;
       console.log('État restauré depuis MongoDB');
     } else {
@@ -37,6 +36,7 @@ connectDB()
 
     server.listen(PORT, () => {
       console.log(`Serveur lancé sur http://localhost:${PORT}`);
+      callServices();
     });
   })
   .catch((err) => {
