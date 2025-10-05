@@ -1,5 +1,6 @@
 const express = require('express');
 const dataRoute = require('./routes/dataRoutes');
+const authRoute = require('./routes/authRoutes');
 const { getIo } = require('./socket');
 const app = express();
 
@@ -21,6 +22,7 @@ app.use((req, res, next) => {
 });
 
 app.use('/api/data', dataRoute);
+app.use('/api/auth', authRoute);
 
 // setInterval(async () => {
 //     try{
